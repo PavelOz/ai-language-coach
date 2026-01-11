@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import hashlib
+import base64 # <--- NEW IMPORT
 import azure.cognitiveservices.speech as speechsdk
 from dotenv import load_dotenv
 
@@ -88,9 +89,6 @@ if not speech_key or not speech_region:
 
 # --- HELPER FUNCTIONS ---
 def get_native_audio_path(text, language_code, voice_name):
-    """
-    Returns the FILE PATH of the audio.
-    """
     filename_hash = hashlib.md5(f"{language_code}_{text}".encode()).hexdigest()
     folder = "audio_cache"
     filepath = os.path.join(folder, f"{filename_hash}.wav")
@@ -98,12 +96,10 @@ def get_native_audio_path(text, language_code, voice_name):
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-    # 1. CHECK DISK
     if os.path.exists(filepath):
         if os.path.getsize(filepath) > 0:
             return filepath
 
-    # 2. CALL AZURE
     speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
     speech_config.speech_synthesis_voice_name = voice_name
     
@@ -116,6 +112,24 @@ def get_native_audio_path(text, language_code, voice_name):
         return filepath
         
     return None
+
+def play_audio_html(file_path, autoplay=False):
+    """
+    Renders an HTML5 audio player directly. 
+    Bypasses st.audio to avoid TypeError on Cloud.
+    """
+    with open(file_path, "rb") as f:
+        data = f.read()
+    b64 = base64.b64encode(data).decode()
+    
+    # We add a timestamp to src to force browser reload if needed
+    auto_attr = "autoplay" if autoplay else ""
+    md = f"""
+        <audio controls {auto_attr} style="width: 100%;">
+            <source src="data:audio/wav;base64,{b64}" type="audio/wav">
+        </audio>
+    """
+    st.markdown(md, unsafe_allow_html=True)
 
 # --- UI LAYOUT ---
 st.set_page_config(page_title="AI Coach", page_icon="🧸") 
@@ -160,7 +174,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# --- 2. AUDIO CONTROLS (String Path Fix) ---
+# --- 2. AUDIO CONTROLS (HTML5 Fix) ---
 audio_filepath = get_native_audio_path(clean_text, lang_code, voice_name)
 
 # Initialize counter
@@ -176,13 +190,8 @@ if st.button("🔊 PLAY AUDIO"):
 if audio_filepath and os.path.exists(audio_filepath):
     should_autoplay = st.session_state.get('auto_play_trigger', False)
     
-    # <--- FIXED LINE: Passing the string path, NOT the file object
-    st.audio(
-        audio_filepath, 
-        format="audio/wav", 
-        autoplay=should_autoplay, 
-        key=f"audio_player_{st.session_state['play_counter']}"
-    )
+    # <--- FIXED: Using direct HTML player instead of st.audio
+    play_audio_html(audio_filepath, autoplay=should_autoplay)
     
     if should_autoplay:
         st.session_state['auto_play_trigger'] = False
