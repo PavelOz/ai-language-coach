@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import hashlib
 import base64
+import time # <--- NEW IMPORT
 import azure.cognitiveservices.speech as speechsdk
 from dotenv import load_dotenv
 
@@ -91,7 +92,8 @@ if not speech_key or not speech_region:
 
 # --- HELPER FUNCTIONS ---
 def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
-    speed_suffix = "_veryslow" if slow_mode else "_normal"
+    # We use a NEW suffix to ensure we don't load old cached files
+    speed_suffix = "_superslow" if slow_mode else "_normal"
     filename_hash = hashlib.md5(f"{language_code}_{text}{speed_suffix}".encode()).hexdigest()
     
     folder = "audio_cache"
@@ -108,7 +110,7 @@ def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
     audio_config = speechsdk.audio.AudioOutputConfig(filename=filepath)
     synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
     
-    # <--- CHANGE: Increased slowdown from -25% to -50% --->
+    # -50% is VERY slow. You should definitely hear this.
     rate = "-50%" if slow_mode else "0%"
     
     ssml_string = f"""
@@ -133,8 +135,12 @@ def autoplay_audio(file_path):
         data = f.read()
     b64 = base64.b64encode(data).decode()
     
+    # CACHE BUSTER: We generate a unique ID using the current time.
+    # This guarantees the browser renders a new player every single time.
+    unique_id = int(time.time() * 1000)
+    
     md = f"""
-        <audio controls id="audio-player">
+        <audio controls id="audio-player-{unique_id}">
             <source src="data:audio/wav;base64,{b64}" type="audio/wav">
         </audio>
     """
@@ -144,7 +150,7 @@ def autoplay_audio(file_path):
 st.set_page_config(page_title="AI Coach", page_icon="🧸") 
 local_css()
 
-# SIDEBAR (Settings Only)
+# SIDEBAR
 with st.sidebar:
     st.header("⚙️ Settings")
     selected_lang_label = st.selectbox("Language:", list(LANGUAGES.keys()))
@@ -183,15 +189,19 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# --- 2. AUDIO PLAYER (With Main Window Toggle) ---
-
-# <--- NEW LOCATION: Checkbox is now here, right above the player --->
+# --- 2. AUDIO PLAYER ---
 col1, col2 = st.columns([1, 2])
 with col1:
-    st.write("") # Alignment spacer
+    st.write("") 
     st.write("🔊 **Playback:**")
 with col2:
-    slow_mode = st.toggle("🐢 Slow Speed", value=False)
+    slow_mode = st.toggle("🐢 Slow Speed (50%)", value=False)
+
+# Visual Confirmation for Debugging
+if slow_mode:
+    st.caption("🐢 Generating Slow Audio... (Wait 2s)")
+else:
+    st.caption("🐇 Normal Speed")
 
 audio_filepath = get_native_audio_path(clean_text, lang_code, voice_name, slow_mode)
 
