@@ -2,7 +2,7 @@ import streamlit as st
 import os
 import hashlib
 import base64
-import time # <--- NEW IMPORT
+import time
 import azure.cognitiveservices.speech as speechsdk
 from dotenv import load_dotenv
 
@@ -26,8 +26,6 @@ def local_css():
             line-height: 1.4;
             margin: 0;
         }
-        
-        /* Zoomed Audio Player */
         audio {
             width: 80%; 
             height: 60px;
@@ -38,15 +36,12 @@ def local_css():
             border-radius: 30px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
-        
-        /* Zoomed Recording Widget */
         div[data-testid="stAudioInput"] {
             transform: scale(1.3);
             transform-origin: center left;
             margin-top: 20px;
             margin-bottom: 40px;
         }
-        
         .result-box {
             font-size: 20px; 
             padding: 15px; 
@@ -92,8 +87,8 @@ if not speech_key or not speech_region:
 
 # --- HELPER FUNCTIONS ---
 def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
-    # We use a NEW suffix to ensure we don't load old cached files
-    speed_suffix = "_superslow" if slow_mode else "_normal"
+    # CHANGED: Suffix includes "v2" to force new files
+    speed_suffix = "_v2_xslow" if slow_mode else "_v2_normal"
     filename_hash = hashlib.md5(f"{language_code}_{text}{speed_suffix}".encode()).hexdigest()
     
     folder = "audio_cache"
@@ -110,8 +105,8 @@ def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
     audio_config = speechsdk.audio.AudioOutputConfig(filename=filepath)
     synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
     
-    # -50% is VERY slow. You should definitely hear this.
-    rate = "-50%" if slow_mode else "0%"
+    # CHANGED: Using 'x-slow' instead of percentage for better compatibility
+    rate = "x-slow" if slow_mode else "default"
     
     ssml_string = f"""
     <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{language_code}">
@@ -134,13 +129,10 @@ def autoplay_audio(file_path):
     with open(file_path, "rb") as f:
         data = f.read()
     b64 = base64.b64encode(data).decode()
-    
-    # CACHE BUSTER: We generate a unique ID using the current time.
-    # This guarantees the browser renders a new player every single time.
     unique_id = int(time.time() * 1000)
     
     md = f"""
-        <audio controls id="audio-player-{unique_id}">
+        <audio controls id="audio-{unique_id}" style="display:block;">
             <source src="data:audio/wav;base64,{b64}" type="audio/wav">
         </audio>
     """
@@ -195,13 +187,13 @@ with col1:
     st.write("") 
     st.write("🔊 **Playback:**")
 with col2:
-    slow_mode = st.toggle("🐢 Slow Speed (50%)", value=False)
+    slow_mode = st.toggle("🐢 Slow Mode", value=False)
 
-# Visual Confirmation for Debugging
+# NEW: Dynamic Status Label
 if slow_mode:
-    st.caption("🐢 Generating Slow Audio... (Wait 2s)")
+    st.info("🐢 Current Speed: Extra Slow")
 else:
-    st.caption("🐇 Normal Speed")
+    st.caption("🐇 Current Speed: Normal")
 
 audio_filepath = get_native_audio_path(clean_text, lang_code, voice_name, slow_mode)
 
