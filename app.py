@@ -3,7 +3,7 @@ import os
 import hashlib
 import base64
 import time
-import xml.sax.saxutils # <--- NEW: For safely escaping text
+import xml.sax.saxutils
 import azure.cognitiveservices.speech as speechsdk
 from dotenv import load_dotenv
 
@@ -88,8 +88,8 @@ if not speech_key or not speech_region:
 
 # --- HELPER FUNCTIONS ---
 def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
-    # Suffix v4 to clear old cache
-    speed_suffix = "_v4_slow" if slow_mode else "_v4_normal"
+    # FORCE V5: This ensures we ignore all previous broken files
+    speed_suffix = "_v5_slow" if slow_mode else "_v5_normal"
     filename_hash = hashlib.md5(f"{language_code}_{text}{speed_suffix}".encode()).hexdigest()
     
     folder = "audio_cache"
@@ -99,20 +99,22 @@ def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
     if not os.path.exists(folder):
         os.makedirs(folder)
 
+    # If file exists, check size to make sure it's not a 0-byte error
     if os.path.exists(filepath):
-        if os.path.getsize(filepath) > 0:
+        if os.path.getsize(filepath) > 100: # Valid audio is usually > 1kb
             return filepath, readable_name
 
     speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
     audio_config = speechsdk.audio.AudioOutputConfig(filename=filepath)
     synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
     
-    # <--- CRITICAL FIX: Use decimal string "0.6" (60% speed) instead of percentage --->
-    rate = "0.6" if slow_mode else "1.0"
+    # FORCE 0.5 (Half Speed)
+    # Using decimal is safer for Multilingual voices than percentage
+    rate = "0.5" if slow_mode else "1.0"
     
-    # Safe text escape (prevents SSML breakage if text has '&' or '<')
     safe_text = xml.sax.saxutils.escape(text)
     
+    # We simplified the SSML structure to minimize compatibility errors
     ssml_string = f"""
     <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{language_code}">
         <voice name="{voice_name}">
@@ -192,18 +194,19 @@ with col1:
     st.write("") 
     st.write("🔊 **Playback:**")
 with col2:
-    slow_mode = st.toggle("🐢 Slow Mode", value=False)
+    slow_mode = st.toggle("🐢 Slow Mode (0.5x)", value=False)
 
 audio_filepath, audio_filename = get_native_audio_path(clean_text, lang_code, voice_name, slow_mode)
 
-if audio_filename:
-    if "slow" in audio_filename:
-        st.info(f"🐢 Playing Slow (Rate: 0.6) - `{audio_filename}`")
-    else:
-        st.caption(f"🐇 Playing Normal - `{audio_filename}`")
-
 if audio_filepath and os.path.exists(audio_filepath):
     autoplay_audio(audio_filepath)
+    
+    # DEBUG INFO (Visible at bottom)
+    file_size = os.path.getsize(audio_filepath) / 1024 # KB
+    if slow_mode:
+        st.caption(f"🐢 Playing Slow (V5) | Size: {file_size:.1f}KB")
+    else:
+        st.caption(f"🐇 Playing Normal (V5) | Size: {file_size:.1f}KB")
 
 st.write("---")
 
