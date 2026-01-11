@@ -37,8 +37,9 @@ def local_css():
             border-radius: 30px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
-        .slow-player audio {
-            border: 3px solid #007bff; /* Blue border for Slow */
+        /* Visual feedback for non-standard speeds */
+        .custom-speed audio {
+            border: 3px solid #6610f2; /* Purple border for Custom Speed */
         }
         div[data-testid="stAudioInput"] {
             transform: scale(1.3);
@@ -90,12 +91,13 @@ if not speech_key or not speech_region:
     st.stop()
 
 # --- HELPER FUNCTIONS ---
-def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
-    speed_suffix = "_v6_slow" if slow_mode else "_v6_normal"
-    filename_hash = hashlib.md5(f"{language_code}_{text}{speed_suffix}".encode()).hexdigest()
+def get_native_audio_path(text, language_code, voice_name, speed_rate):
+    # Hash includes the specific speed (e.g. "0.8")
+    # This means 0.8 and 0.9 are stored as different files.
+    filename_hash = hashlib.md5(f"{language_code}_{text}_{speed_rate}".encode()).hexdigest()
     
     folder = "audio_cache"
-    readable_name = f"{filename_hash}{speed_suffix}.wav"
+    readable_name = f"{filename_hash}_x{speed_rate}.wav"
     filepath = os.path.join(folder, readable_name)
 
     if not os.path.exists(folder):
@@ -109,13 +111,13 @@ def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
     audio_config = speechsdk.audio.AudioOutputConfig(filename=filepath)
     synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
     
-    rate = "0.5" if slow_mode else "1.0"
     safe_text = xml.sax.saxutils.escape(text)
     
+    # We pass the slider value (e.g. 0.8) directly to Azure
     ssml_string = f"""
     <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{language_code}">
         <voice name="{voice_name}">
-            <prosody rate="{rate}">
+            <prosody rate="{speed_rate}">
                 {safe_text}
             </prosody>
         </voice>
@@ -129,17 +131,16 @@ def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
         
     return None, None
 
-def render_player(file_path, player_type="normal"):
+def render_player(file_path, speed_rate):
     with open(file_path, "rb") as f:
         data = f.read()
     b64 = base64.b64encode(data).decode()
     
-    if player_type == "slow":
-        unique_id = f"SLOW_{int(time.time())}"
-        border_style = "border: 4px solid #007bff;" 
-    else:
-        unique_id = f"NORM_{int(time.time())}"
-        border_style = "" 
+    # Unique ID every time to force browser reload
+    unique_id = f"PLAYER_{speed_rate}_{int(time.time())}"
+    
+    # Purple border if not 1.0 (Visual Feedback)
+    border_style = "border: 4px solid #6610f2;" if speed_rate != 1.0 else ""
 
     md = f"""
         <audio controls id="{unique_id}" style="display:block; {border_style}">
@@ -192,32 +193,23 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # --- 2. AUDIO PLAYER ---
-col1, col2 = st.columns([1, 2])
-with col1:
-    st.write("") 
-    st.write("🔊 **Playback:**")
-with col2:
-    slow_mode = st.toggle("🐢 Slow Mode (0.5x)", value=False)
+st.write("🔊 **Playback Speed:**")
+# The Slider!
+speed_val = st.slider("Select Speed", min_value=0.5, max_value=1.2, value=1.0, step=0.1, label_visibility="collapsed")
 
-# Get current audio
-audio_filepath, audio_filename = get_native_audio_path(clean_text, lang_code, voice_name, slow_mode)
+# Logic
+audio_filepath, audio_filename = get_native_audio_path(clean_text, lang_code, voice_name, speed_val)
 
 if audio_filepath and os.path.exists(audio_filepath):
-    p_type = "slow" if slow_mode else "normal"
-    render_player(audio_filepath, player_type=p_type)
+    render_player(audio_filepath, speed_val)
     
-    # --- DOWNLOAD BUTTONS (The Ultimate Check) ---
-    st.write("")
+    # Download Button
     with open(audio_filepath, "rb") as f:
         file_bytes = f.read()
-        
-    btn_label = "⬇️ Download SLOW Audio" if slow_mode else "⬇️ Download NORMAL Audio"
-    file_name = f"slow_{clean_text[:5]}.wav" if slow_mode else f"normal_{clean_text[:5]}.wav"
-    
     st.download_button(
-        label=btn_label,
+        label=f"⬇️ Download ({speed_val}x)",
         data=file_bytes,
-        file_name=file_name,
+        file_name=f"audio_x{speed_val}.wav",
         mime="audio/wav"
     )
 
