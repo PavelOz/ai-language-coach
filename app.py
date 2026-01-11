@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 import hashlib
-import base64 # <--- NEW IMPORT
+import base64
 import azure.cognitiveservices.speech as speechsdk
 from dotenv import load_dotenv
 
@@ -15,7 +15,7 @@ def local_css():
             border-radius: 20px;
             border: 2px solid #e0e0e0;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
+            margin-bottom: 30px;
             text-align: center;
         }
         .big-font {
@@ -25,25 +25,31 @@ def local_css():
             line-height: 1.4;
             margin: 0;
         }
-        div.stButton > button {
-            width: 100%;
-            height: 70px;
-            font-size: 28px !important;
-            font-weight: bold;
-            color: #ffffff !important;
-            background-color: #007bff !important;
-            border: none;
-            border-radius: 15px;
+        
+        /* --- NEW: ZOOM THE AUDIO PLAYER --- */
+        /* We shrink width to 75% then scale up 1.3x to fill space without scrolling */
+        audio {
+            width: 75%; 
+            height: 60px;
+            transform: scale(1.3);     /* The Magic Zoom */
+            transform-origin: center;  /* Grow from the center */
+            margin-top: 20px;
+            margin-bottom: 20px;
+            display: block;
+            margin-left: auto;
+            margin-right: auto;
+            border-radius: 30px;       /* Smoother corners */
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); /* Subtle shadow for depth */
         }
-        div.stButton > button:active {
-            background-color: #0056b3 !important;
-        }
+        
+        /* Zoomed Recording Widget */
         div[data-testid="stAudioInput"] {
             transform: scale(1.3);
             transform-origin: center left;
-            margin-top: 10px;
-            margin-bottom: 30px;
+            margin-top: 20px;
+            margin-bottom: 40px;
         }
+        
         .result-box {
             font-size: 20px; 
             padding: 15px; 
@@ -113,19 +119,13 @@ def get_native_audio_path(text, language_code, voice_name):
         
     return None
 
-def play_audio_html(file_path, autoplay=False):
-    """
-    Renders an HTML5 audio player directly. 
-    Bypasses st.audio to avoid TypeError on Cloud.
-    """
+def autoplay_audio(file_path):
     with open(file_path, "rb") as f:
         data = f.read()
     b64 = base64.b64encode(data).decode()
     
-    # We add a timestamp to src to force browser reload if needed
-    auto_attr = "autoplay" if autoplay else ""
     md = f"""
-        <audio controls {auto_attr} style="width: 100%;">
+        <audio controls id="audio-player">
             <source src="data:audio/wav;base64,{b64}" type="audio/wav">
         </audio>
     """
@@ -174,27 +174,11 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# --- 2. AUDIO CONTROLS (HTML5 Fix) ---
+# --- 2. AUDIO PLAYER (Zoomed) ---
 audio_filepath = get_native_audio_path(clean_text, lang_code, voice_name)
 
-# Initialize counter
-if 'play_counter' not in st.session_state:
-    st.session_state['play_counter'] = 0
-
-# A. The Big "Play" Button
-if st.button("🔊 PLAY AUDIO"):
-    st.session_state['auto_play_trigger'] = True
-    st.session_state['play_counter'] += 1
-
-# B. The Player
 if audio_filepath and os.path.exists(audio_filepath):
-    should_autoplay = st.session_state.get('auto_play_trigger', False)
-    
-    # <--- FIXED: Using direct HTML player instead of st.audio
-    play_audio_html(audio_filepath, autoplay=should_autoplay)
-    
-    if should_autoplay:
-        st.session_state['auto_play_trigger'] = False
+    autoplay_audio(audio_filepath)
 
 st.write("---")
 
