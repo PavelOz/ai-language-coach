@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import hashlib
+import io  # <--- NEW IMPORT
 import azure.cognitiveservices.speech as speechsdk
 from dotenv import load_dotenv
 
@@ -88,10 +89,7 @@ if not speech_key or not speech_region:
 
 # --- HELPER FUNCTIONS ---
 def get_native_audio(text, language_code, voice_name):
-    """
-    Checks disk cache first. If missing, calls Azure and saves file.
-    """
-    # 1. Create a safe filename (using hash to handle special chars like ?)
+    # 1. Create a safe filename
     filename_hash = hashlib.md5(f"{language_code}_{text}".encode()).hexdigest()
     folder = "audio_cache"
     filepath = os.path.join(folder, f"{filename_hash}.wav")
@@ -100,23 +98,21 @@ def get_native_audio(text, language_code, voice_name):
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-    # 2. CHECK DISK: If file exists, read it (FREE)
+    # 2. CHECK DISK: If file exists, read it
     if os.path.exists(filepath):
         with open(filepath, "rb") as f:
             return f.read()
 
-    # 3. CALL AZURE: If not found, generate it (COST)
+    # 3. CALL AZURE: If not found, generate it
     speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
     speech_config.speech_synthesis_voice_name = voice_name
     
-    # We use an AudioFileOutput to save directly to disk
     audio_config = speechsdk.audio.AudioOutputConfig(filename=filepath)
     synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
     
     result = synthesizer.speak_text_async(text).get()
     
     if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-        # Now read it back to return the bytes
         with open(filepath, "rb") as f:
             return f.read()
     return None
@@ -164,25 +160,25 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# --- 2. AUDIO CONTROLS (With Replay Fix) ---
+# --- 2. AUDIO CONTROLS (With BytesIO Fix) ---
 audio_data = get_native_audio(clean_text, lang_code, voice_name)
 
-# Initialize counter for force-replay
+# Initialize counter
 if 'play_counter' not in st.session_state:
     st.session_state['play_counter'] = 0
 
 # A. The Big "Play" Button
 if st.button("🔊 PLAY AUDIO"):
     st.session_state['auto_play_trigger'] = True
-    st.session_state['play_counter'] += 1  # Increment to force reload
+    st.session_state['play_counter'] += 1
 
-# B. The Player (Hidden Logic)
+# B. The Player
 if audio_data:
     should_autoplay = st.session_state.get('auto_play_trigger', False)
     
-    # Key includes counter so Streamlit sees it as a "New" player every time
+    # <--- FIXED LINE BELOW: Wrapped in io.BytesIO()
     st.audio(
-        audio_data, 
+        io.BytesIO(audio_data), 
         format="audio/wav", 
         autoplay=should_autoplay, 
         key=f"audio_player_{st.session_state['play_counter']}"
