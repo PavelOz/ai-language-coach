@@ -231,3 +231,4 @@ if audio_input is not None:
         st.markdown(html_string, unsafe_allow_html=True)
 
     elif result.reason == speechsdk.ResultReason.NoMatch:
+        st.info("🎤 I didn't hear anything. Tap Record again!")
