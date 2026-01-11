@@ -27,6 +27,7 @@ def local_css():
             line-height: 1.4;
             margin: 0;
         }
+        /* PLAYER STYLES */
         audio {
             width: 80%; 
             height: 60px;
@@ -37,6 +38,12 @@ def local_css():
             border-radius: 30px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
+        
+        /* Highlight Slow Player in Blue to confirm switch */
+        .slow-player audio {
+            border: 3px solid #007bff; /* Blue border for Slow */
+        }
+        
         div[data-testid="stAudioInput"] {
             transform: scale(1.3);
             transform-origin: center left;
@@ -88,8 +95,8 @@ if not speech_key or not speech_region:
 
 # --- HELPER FUNCTIONS ---
 def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
-    # FORCE V5: This ensures we ignore all previous broken files
-    speed_suffix = "_v5_slow" if slow_mode else "_v5_normal"
+    # Suffix V6 to be safe
+    speed_suffix = "_v6_slow" if slow_mode else "_v6_normal"
     filename_hash = hashlib.md5(f"{language_code}_{text}{speed_suffix}".encode()).hexdigest()
     
     folder = "audio_cache"
@@ -99,22 +106,18 @@ def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-    # If file exists, check size to make sure it's not a 0-byte error
     if os.path.exists(filepath):
-        if os.path.getsize(filepath) > 100: # Valid audio is usually > 1kb
+        if os.path.getsize(filepath) > 100: 
             return filepath, readable_name
 
     speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
     audio_config = speechsdk.audio.AudioOutputConfig(filename=filepath)
     synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
     
-    # FORCE 0.5 (Half Speed)
-    # Using decimal is safer for Multilingual voices than percentage
+    # 0.5 is exactly half speed
     rate = "0.5" if slow_mode else "1.0"
-    
     safe_text = xml.sax.saxutils.escape(text)
     
-    # We simplified the SSML structure to minimize compatibility errors
     ssml_string = f"""
     <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{language_code}">
         <voice name="{voice_name}">
@@ -132,14 +135,26 @@ def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
         
     return None, None
 
-def autoplay_audio(file_path):
+def render_player(file_path, player_type="normal"):
+    """
+    Renders one of two distinct players based on type.
+    """
     with open(file_path, "rb") as f:
         data = f.read()
     b64 = base64.b64encode(data).decode()
-    unique_id = int(time.time() * 1000)
     
+    # We use a completely different ID prefix for Slow vs Normal
+    # This prevents the browser from confusing them.
+    if player_type == "slow":
+        unique_id = f"SLOW_{int(time.time())}"
+        # Blue Border for Visual Confirmation
+        border_style = "border: 4px solid #007bff;" 
+    else:
+        unique_id = f"NORM_{int(time.time())}"
+        border_style = "" 
+
     md = f"""
-        <audio controls id="audio-{unique_id}" style="display:block;">
+        <audio controls id="{unique_id}" style="display:block; {border_style}">
             <source src="data:audio/wav;base64,{b64}" type="audio/wav">
         </audio>
     """
@@ -196,17 +211,20 @@ with col1:
 with col2:
     slow_mode = st.toggle("🐢 Slow Mode (0.5x)", value=False)
 
+# LOGIC
 audio_filepath, audio_filename = get_native_audio_path(clean_text, lang_code, voice_name, slow_mode)
 
 if audio_filepath and os.path.exists(audio_filepath):
-    autoplay_audio(audio_filepath)
+    # Pass the 'type' to the render function so it creates a UNIQUE player
+    p_type = "slow" if slow_mode else "normal"
+    render_player(audio_filepath, player_type=p_type)
     
-    # DEBUG INFO (Visible at bottom)
-    file_size = os.path.getsize(audio_filepath) / 1024 # KB
+    # Debug
+    file_size = os.path.getsize(audio_filepath) / 1024 
     if slow_mode:
-        st.caption(f"🐢 Playing Slow (V5) | Size: {file_size:.1f}KB")
+        st.caption(f"🐢 SLOW Player Loaded | {file_size:.1f}KB")
     else:
-        st.caption(f"🐇 Playing Normal (V5) | Size: {file_size:.1f}KB")
+        st.caption(f"🐇 NORMAL Player Loaded | {file_size:.1f}KB")
 
 st.write("---")
 
