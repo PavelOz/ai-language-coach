@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import hashlib
 import azure.cognitiveservices.speech as speechsdk
 from dotenv import load_dotenv
 
@@ -7,7 +8,6 @@ from dotenv import load_dotenv
 def local_css():
     st.markdown("""
         <style>
-        /* 1. The 'Flashcard' Container (Forces White Background) */
         .flashcard {
             background-color: #ffffff;
             padding: 30px;
@@ -17,42 +17,32 @@ def local_css():
             margin-bottom: 20px;
             text-align: center;
         }
-        
-        /* 2. The Target Text (Always Dark on White) */
         .big-font {
             font-size: 32px !important;
             font-weight: 700;
-            color: #1a1a1a !important; /* Force Black */
+            color: #1a1a1a !important;
             line-height: 1.4;
             margin: 0;
         }
-        
-        /* 3. The 'Play' Button (High Contrast Blue) */
         div.stButton > button {
             width: 100%;
             height: 70px;
             font-size: 28px !important;
             font-weight: bold;
             color: #ffffff !important;
-            background-color: #007bff !important; /* Bright Blue */
+            background-color: #007bff !important;
             border: none;
             border-radius: 15px;
-            transition: transform 0.1s;
         }
         div.stButton > button:active {
-            transform: scale(0.98); /* Click effect */
             background-color: #0056b3 !important;
         }
-        
-        /* 4. Zoomed Recording Widget */
         div[data-testid="stAudioInput"] {
             transform: scale(1.3);
             transform-origin: center left;
             margin-top: 10px;
             margin-bottom: 30px;
         }
-        
-        /* 5. Result Badges */
         .result-box {
             font-size: 20px; 
             padding: 15px; 
@@ -98,18 +88,37 @@ if not speech_key or not speech_region:
 
 # --- HELPER FUNCTIONS ---
 def get_native_audio(text, language_code, voice_name):
-    cache_key = f"audio_{language_code}_{text}"
-    if cache_key in st.session_state:
-        return st.session_state[cache_key]
+    """
+    Checks disk cache first. If missing, calls Azure and saves file.
+    """
+    # 1. Create a safe filename (using hash to handle special chars like ?)
+    filename_hash = hashlib.md5(f"{language_code}_{text}".encode()).hexdigest()
+    folder = "audio_cache"
+    filepath = os.path.join(folder, f"{filename_hash}.wav")
 
+    # Ensure folder exists
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+
+    # 2. CHECK DISK: If file exists, read it (FREE)
+    if os.path.exists(filepath):
+        with open(filepath, "rb") as f:
+            return f.read()
+
+    # 3. CALL AZURE: If not found, generate it (COST)
     speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
     speech_config.speech_synthesis_voice_name = voice_name
-    synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=None)
+    
+    # We use an AudioFileOutput to save directly to disk
+    audio_config = speechsdk.audio.AudioOutputConfig(filename=filepath)
+    synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
+    
     result = synthesizer.speak_text_async(text).get()
     
     if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-        st.session_state[cache_key] = result.audio_data
-        return result.audio_data
+        # Now read it back to return the bytes
+        with open(filepath, "rb") as f:
+            return f.read()
     return None
 
 # --- UI LAYOUT ---
@@ -148,31 +157,37 @@ if not target_text:
 
 clean_text = target_text.split("(")[0].strip()
 
-# --- 1. THE FLASHCARD (Visuals) ---
+# --- 1. THE FLASHCARD ---
 st.markdown(f"""
 <div class="flashcard">
     <p class="big-font">{clean_text}</p>
 </div>
 """, unsafe_allow_html=True)
 
-# --- 2. AUDIO CONTROLS (Logic) ---
-# Ensure audio is generated/cached
+# --- 2. AUDIO CONTROLS (With Replay Fix) ---
 audio_data = get_native_audio(clean_text, lang_code, voice_name)
 
-# A. The Big "Play" Button (Triggers Autoplay)
-if st.button("🔊 PLAY AUDIO"):
-    # This forces a rerun with autoplay=True
-    st.session_state['auto_play_trigger'] = True
+# Initialize counter for force-replay
+if 'play_counter' not in st.session_state:
+    st.session_state['play_counter'] = 0
 
-# B. The Persistent Player (Always visible for replaying)
+# A. The Big "Play" Button
+if st.button("🔊 PLAY AUDIO"):
+    st.session_state['auto_play_trigger'] = True
+    st.session_state['play_counter'] += 1  # Increment to force reload
+
+# B. The Player (Hidden Logic)
 if audio_data:
-    # Check if we should autoplay (triggered by button)
     should_autoplay = st.session_state.get('auto_play_trigger', False)
     
-    # Render the player
-    st.audio(audio_data, format="audio/wav", autoplay=should_autoplay)
+    # Key includes counter so Streamlit sees it as a "New" player every time
+    st.audio(
+        audio_data, 
+        format="audio/wav", 
+        autoplay=should_autoplay, 
+        key=f"audio_player_{st.session_state['play_counter']}"
+    )
     
-    # Reset trigger so it doesn't autoplay on EVERY interaction (like recording)
     if should_autoplay:
         st.session_state['auto_play_trigger'] = False
 
@@ -206,10 +221,8 @@ if audio_input is not None:
     
     if result.reason == speechsdk.ResultReason.RecognizedSpeech:
         pa = speechsdk.PronunciationAssessmentResult(result)
-        
         score = int(pa.accuracy_score)
         
-        # High Contrast Feedback Boxes
         if score >= 80:
             st.markdown(f'<div class="result-box" style="background-color:#d4edda; color:#155724;">🎉 PERFECT! Score: {score}</div>', unsafe_allow_html=True)
             st.balloons()
@@ -218,13 +231,11 @@ if audio_input is not None:
         else:
             st.markdown(f'<div class="result-box" style="background-color:#f8d7da; color:#721c24;">❌ TRY AGAIN. Score: {score}</div>', unsafe_allow_html=True)
         
-        # Word Breakdown
-        st.write("") # Spacer
+        st.write("") 
         html_string = "<div style='font-size:24px; line-height:2.2; text-align:center;'>"
         for w in pa.words:
-            color = "#28a745" if w.accuracy_score >= THRESHOLD else "#dc3545" # High contrast Green/Red
-            if w.error_type == "Omission": color = "#6c757d" # Grey
-            
+            color = "#28a745" if w.accuracy_score >= THRESHOLD else "#dc3545"
+            if w.error_type == "Omission": color = "#6c757d"
             html_string += f"<span style='border: 2px solid {color}; padding: 5px 12px; border-radius: 12px; margin: 0 4px; color:{color}; font-weight:bold;'>{w.word}</span>"
         html_string += "</div>"
         
