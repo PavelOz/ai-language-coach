@@ -4,6 +4,7 @@ import hashlib
 import base64
 import time
 import xml.sax.saxutils
+import json
 import azure.cognitiveservices.speech as speechsdk
 from dotenv import load_dotenv
 
@@ -91,16 +92,37 @@ if not speech_key or not speech_region:
     st.stop()
 
 # --- HELPER FUNCTIONS ---
+def _debug_log(hypothesis_id, location, message, data):
+    """Helper function for debug logging"""
+    try:
+        log_path = r"c:\Users\pavel\azure-speech-pronunciation-poc\.cursor\debug.log"
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"sessionId": "debug-session", "runId": "run1", "hypothesisId": hypothesis_id, "location": location, "message": message, "data": data, "timestamp": int(time.time() * 1000)}) + "\n")
+    except Exception:
+        pass  # Silent fail to not break app
+
 def speed_to_ssml_rate(speed: float) -> str:
+    # #region agent log
+    _debug_log("B", "app.py:104", "speed_to_ssml_rate entry", {"input_speed": speed})
+    # #endregion
     # speed is multiplier like 0.8..1.2
     speed = round(float(speed), 1)
     pct = int(round((speed - 1.0) * 100))
     if pct == 0:
-        return "default"
-    sign = "+" if pct > 0 else ""  # Azure examples use + for positive
-    return f"{sign}{pct}%"
+        result = "default"
+    else:
+        sign = "+" if pct > 0 else ""  # Azure examples use + for positive
+        result = f"{sign}{pct}%"
+    # #region agent log
+    _debug_log("B", "app.py:115", "speed_to_ssml_rate exit", {"rounded_speed": speed, "percentage": pct, "ssml_rate": result})
+    # #endregion
+    return result
 
 def get_native_audio_path(text, language_code, voice_name, speed_rate):
+    # #region agent log
+    _debug_log("C", "app.py:121", "get_native_audio_path entry", {"text": text, "language_code": language_code, "voice_name": voice_name, "speed_rate_input": speed_rate, "speed_rate_type": str(type(speed_rate))})
+    # #endregion
     speed_rate = round(float(speed_rate), 1)
     ssml_rate = speed_to_ssml_rate(speed_rate)
 
@@ -115,7 +137,16 @@ def get_native_audio_path(text, language_code, voice_name, speed_rate):
 
     os.makedirs(folder, exist_ok=True)
 
+    # #region agent log
+    cache_exists = os.path.exists(filepath)
+    cache_size = os.path.getsize(filepath) if cache_exists else 0
+    _debug_log("A", "app.py:138", "cache check", {"filepath": filepath, "exists": cache_exists, "size": cache_size, "speed_rate": speed_rate, "filename_hash": filename_hash})
+    # #endregion
+
     if os.path.exists(filepath) and os.path.getsize(filepath) > 100:
+        # #region agent log
+        _debug_log("A", "app.py:141", "returning cached file", {"filepath": filepath, "speed_rate": speed_rate})
+        # #endregion
         return filepath, readable_name
 
     speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
@@ -132,19 +163,36 @@ def get_native_audio_path(text, language_code, voice_name, speed_rate):
 </speak>
 """.strip()
 
+    # #region agent log
+    _debug_log("B", "app.py:159", "SSML generated", {"ssml_string": ssml_string, "ssml_rate": ssml_rate, "speed_rate": speed_rate})
+    # #endregion
+
     result = synthesizer.speak_ssml_async(ssml_string).get()
 
+    # #region agent log
+    _debug_log("E", "app.py:165", "Azure synthesis result", {"reason": str(result.reason), "reason_name": result.reason.name if hasattr(result.reason, 'name') else str(result.reason)})
+    # #endregion
+
     if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+        # #region agent log
+        _debug_log("E", "app.py:168", "synthesis completed", {"filepath": filepath, "speed_rate": speed_rate})
+        # #endregion
         return filepath, readable_name
 
     if result.reason == speechsdk.ResultReason.Canceled:
         details = speechsdk.SpeechSynthesisCancellationDetails.from_result(result)
         # This will tell you if SSML was invalid / key/region issues / etc.
+        # #region agent log
+        _debug_log("E", "app.py:174", "synthesis canceled", {"reason": str(details.reason), "error_details": details.error_details})
+        # #endregion
         st.error(f"TTS canceled: {details.reason} | {details.error_details}")
 
     return None, None
 
 def render_player(file_path, speed_rate):
+    # #region agent log
+    _debug_log("D", "app.py:197", "render_player called", {"file_path": file_path, "speed_rate": speed_rate, "file_size": os.path.getsize(file_path) if os.path.exists(file_path) else 0})
+    # #endregion
     with open(file_path, "rb") as f:
         data = f.read()
     b64 = base64.b64encode(data).decode()
@@ -160,6 +208,9 @@ def render_player(file_path, speed_rate):
             <source src="data:audio/wav;base64,{b64}" type="audio/wav">
         </audio>
     """
+    # #region agent log
+    _debug_log("D", "app.py:213", "audio player rendered", {"unique_id": unique_id, "speed_rate": speed_rate, "data_length": len(b64)})
+    # #endregion
     st.markdown(md, unsafe_allow_html=True)
 
 # --- UI LAYOUT ---
@@ -211,8 +262,49 @@ st.write("🔊 **Playback Speed:**")
 speed_val = st.slider("Select Speed", min_value=0.5, max_value=1.2, value=1.0, step=0.1, label_visibility="collapsed")
 speed_val = round(float(speed_val), 1)
 
+# #region agent log
+_debug_log("C", "app.py:272", "slider value captured", {"speed_val": speed_val, "speed_val_type": str(type(speed_val)), "clean_text": clean_text, "lang_code": lang_code, "voice_name": voice_name})
+# #endregion
+
 # Logic
 audio_filepath, audio_filename = get_native_audio_path(clean_text, lang_code, voice_name, speed_val)
+
+# #region agent log
+_debug_log("D", "app.py:279", "audio path returned", {"audio_filepath": audio_filepath, "audio_filename": audio_filename, "speed_val": speed_val, "file_exists": os.path.exists(audio_filepath) if audio_filepath else False})
+# #endregion
+
+# Debug panel (can be collapsed)
+with st.expander("🔍 Debug Info", expanded=False):
+    st.write("**Speed Slider Value:**", speed_val)
+    st.write("**SSML Rate:**", speed_to_ssml_rate(speed_val))
+    st.write("**Language Code:**", lang_code)
+    st.write("**Voice Name:**", voice_name)
+    st.write("**Clean Text:**", clean_text)
+    
+    if audio_filepath:
+        st.write("**Audio File Path:**", audio_filepath)
+        st.write("**File Exists:**", os.path.exists(audio_filepath))
+        if os.path.exists(audio_filepath):
+            st.write("**File Size:**", os.path.getsize(audio_filepath), "bytes")
+        
+        # Show the SSML that would be generated
+        ssml_rate = speed_to_ssml_rate(speed_val)
+        safe_text = xml.sax.saxutils.escape(clean_text)
+        ssml_string = f"""<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{lang_code}">
+  <voice name="{voice_name}">
+    <prosody rate="{ssml_rate}">{safe_text}</prosody>
+  </voice>
+</speak>"""
+        st.code(ssml_string, language="xml")
+        
+        # Show cache info
+        filename_hash = hashlib.md5(
+            f"{lang_code}_{voice_name}_{clean_text}_{speed_val}".encode("utf-8")
+        ).hexdigest()
+        st.write("**Cache Hash:**", filename_hash)
+        st.write("**Expected Cache File:**", f"{filename_hash}_x{speed_val}.wav")
+    else:
+        st.warning("No audio file path returned")
 
 if audio_filepath and os.path.exists(audio_filepath):
     render_player(audio_filepath, speed_val)
