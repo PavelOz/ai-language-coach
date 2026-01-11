@@ -106,16 +106,25 @@ def speed_to_ssml_rate(speed: float) -> str:
     # #region agent log
     _debug_log("B", "app.py:104", "speed_to_ssml_rate entry", {"input_speed": speed})
     # #endregion
-    # speed is multiplier like 0.8..1.2
+    # speed is multiplier like 0.5..1.2
+    # Use relative rate values for more natural speech (not playback speed)
     speed = round(float(speed), 1)
-    pct = int(round((speed - 1.0) * 100))
-    if pct == 0:
-        result = "default"
+    
+    if speed <= 0.6:
+        result = "x-slow"
+    elif speed <= 0.75:
+        result = "slow"
+    elif speed <= 0.9:
+        result = "medium"
+    elif speed <= 1.1:
+        result = "default"  # Normal speed
+    elif speed <= 1.3:
+        result = "fast"
     else:
-        sign = "+" if pct > 0 else ""  # Azure examples use + for positive
-        result = f"{sign}{pct}%"
+        result = "x-fast"
+    
     # #region agent log
-    _debug_log("B", "app.py:115", "speed_to_ssml_rate exit", {"rounded_speed": speed, "percentage": pct, "ssml_rate": result})
+    _debug_log("B", "app.py:125", "speed_to_ssml_rate exit", {"rounded_speed": speed, "ssml_rate": result})
     # #endregion
     return result
 
@@ -155,10 +164,24 @@ def get_native_audio_path(text, language_code, voice_name, speed_rate):
 
     safe_text = xml.sax.saxutils.escape(text)
 
+    # Adjust pitch slightly for more natural slow/fast speech
+    # Slower speech: slightly lower pitch, faster speech: slightly higher pitch
+    if speed_rate < 0.9:
+        pitch = "-5%"  # Slightly lower for slow speech
+    elif speed_rate > 1.1:
+        pitch = "+5%"  # Slightly higher for fast speech
+    else:
+        pitch = "default"  # Normal pitch
+    
+    # Build prosody attributes
+    prosody_attrs = f'rate="{ssml_rate}"'
+    if pitch != "default":
+        prosody_attrs += f' pitch="{pitch}"'
+
     ssml_string = f"""
 <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{language_code}">
   <voice name="{voice_name}">
-    <prosody rate="{ssml_rate}">{safe_text}</prosody>
+    <prosody {prosody_attrs}>{safe_text}</prosody>
   </voice>
 </speak>
 """.strip()
