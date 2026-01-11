@@ -91,22 +91,19 @@ def get_native_audio_path(text, language_code, voice_name):
     """
     Returns the FILE PATH of the audio.
     """
-    # 1. Create a safe filename
     filename_hash = hashlib.md5(f"{language_code}_{text}".encode()).hexdigest()
     folder = "audio_cache"
     filepath = os.path.join(folder, f"{filename_hash}.wav")
 
-    # Ensure folder exists
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-    # 2. CHECK DISK: If file exists, return path (FREE)
+    # 1. CHECK DISK
     if os.path.exists(filepath):
-        # Double check file is not empty (0 bytes)
         if os.path.getsize(filepath) > 0:
             return filepath
 
-    # 3. CALL AZURE: If not found, generate it
+    # 2. CALL AZURE
     speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
     speech_config.speech_synthesis_voice_name = voice_name
     
@@ -163,7 +160,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# --- 2. AUDIO CONTROLS (File Path Fix) ---
+# --- 2. AUDIO CONTROLS (String Path Fix) ---
 audio_filepath = get_native_audio_path(clean_text, lang_code, voice_name)
 
 # Initialize counter
@@ -179,15 +176,13 @@ if st.button("🔊 PLAY AUDIO"):
 if audio_filepath and os.path.exists(audio_filepath):
     should_autoplay = st.session_state.get('auto_play_trigger', False)
     
-    # We open the file and pass the 'file object' to Streamlit
-    # This is the most stable way to play audio in Python 3.13
-    with open(audio_filepath, "rb") as audio_file:
-        st.audio(
-            audio_file, 
-            format="audio/wav", 
-            autoplay=should_autoplay, 
-            key=f"audio_player_{st.session_state['play_counter']}"
-        )
+    # <--- FIXED LINE: Passing the string path, NOT the file object
+    st.audio(
+        audio_filepath, 
+        format="audio/wav", 
+        autoplay=should_autoplay, 
+        key=f"audio_player_{st.session_state['play_counter']}"
+    )
     
     if should_autoplay:
         st.session_state['auto_play_trigger'] = False
