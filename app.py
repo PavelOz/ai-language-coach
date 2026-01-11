@@ -1,7 +1,6 @@
 import streamlit as st
 import os
 import hashlib
-import io  # <--- NEW IMPORT
 import azure.cognitiveservices.speech as speechsdk
 from dotenv import load_dotenv
 
@@ -88,7 +87,10 @@ if not speech_key or not speech_region:
     st.stop()
 
 # --- HELPER FUNCTIONS ---
-def get_native_audio(text, language_code, voice_name):
+def get_native_audio_path(text, language_code, voice_name):
+    """
+    Returns the FILE PATH of the audio.
+    """
     # 1. Create a safe filename
     filename_hash = hashlib.md5(f"{language_code}_{text}".encode()).hexdigest()
     folder = "audio_cache"
@@ -98,10 +100,11 @@ def get_native_audio(text, language_code, voice_name):
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-    # 2. CHECK DISK: If file exists, read it
+    # 2. CHECK DISK: If file exists, return path (FREE)
     if os.path.exists(filepath):
-        with open(filepath, "rb") as f:
-            return f.read()
+        # Double check file is not empty (0 bytes)
+        if os.path.getsize(filepath) > 0:
+            return filepath
 
     # 3. CALL AZURE: If not found, generate it
     speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
@@ -113,8 +116,8 @@ def get_native_audio(text, language_code, voice_name):
     result = synthesizer.speak_text_async(text).get()
     
     if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-        with open(filepath, "rb") as f:
-            return f.read()
+        return filepath
+        
     return None
 
 # --- UI LAYOUT ---
@@ -160,8 +163,8 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# --- 2. AUDIO CONTROLS (With BytesIO Fix) ---
-audio_data = get_native_audio(clean_text, lang_code, voice_name)
+# --- 2. AUDIO CONTROLS (File Path Fix) ---
+audio_filepath = get_native_audio_path(clean_text, lang_code, voice_name)
 
 # Initialize counter
 if 'play_counter' not in st.session_state:
@@ -173,16 +176,18 @@ if st.button("🔊 PLAY AUDIO"):
     st.session_state['play_counter'] += 1
 
 # B. The Player
-if audio_data:
+if audio_filepath and os.path.exists(audio_filepath):
     should_autoplay = st.session_state.get('auto_play_trigger', False)
     
-    # <--- FIXED LINE BELOW: Wrapped in io.BytesIO()
-    st.audio(
-        io.BytesIO(audio_data), 
-        format="audio/wav", 
-        autoplay=should_autoplay, 
-        key=f"audio_player_{st.session_state['play_counter']}"
-    )
+    # We open the file and pass the 'file object' to Streamlit
+    # This is the most stable way to play audio in Python 3.13
+    with open(audio_filepath, "rb") as audio_file:
+        st.audio(
+            audio_file, 
+            format="audio/wav", 
+            autoplay=should_autoplay, 
+            key=f"audio_player_{st.session_state['play_counter']}"
+        )
     
     if should_autoplay:
         st.session_state['auto_play_trigger'] = False
