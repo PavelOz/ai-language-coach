@@ -15,7 +15,7 @@ def local_css():
             border-radius: 20px;
             border: 2px solid #e0e0e0;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            margin-bottom: 30px;
+            margin-bottom: 20px;
             text-align: center;
         }
         .big-font {
@@ -28,7 +28,7 @@ def local_css():
         
         /* Zoomed Audio Player */
         audio {
-            width: 75%; 
+            width: 80%; 
             height: 60px;
             transform: scale(1.3);
             transform-origin: center;
@@ -91,12 +91,7 @@ if not speech_key or not speech_region:
 
 # --- HELPER FUNCTIONS ---
 def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
-    """
-    Returns the FILE PATH of the audio.
-    Supports Slow Mode via SSML.
-    """
-    # 1. Update Hash to include speed setting (so we cache both versions separately)
-    speed_suffix = "_slow" if slow_mode else "_normal"
+    speed_suffix = "_veryslow" if slow_mode else "_normal"
     filename_hash = hashlib.md5(f"{language_code}_{text}{speed_suffix}".encode()).hexdigest()
     
     folder = "audio_cache"
@@ -105,22 +100,17 @@ def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-    # 2. Check Disk
     if os.path.exists(filepath):
         if os.path.getsize(filepath) > 0:
             return filepath
 
-    # 3. Call Azure (SSML)
     speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
-    # Note: We don't set voice name here, we set it inside the SSML string below
-    
     audio_config = speechsdk.audio.AudioOutputConfig(filename=filepath)
     synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
     
-    # Define Rate: -25% is a comfortable "Learning Speed"
-    rate = "-25%" if slow_mode else "0%"
+    # <--- CHANGE: Increased slowdown from -25% to -50% --->
+    rate = "-50%" if slow_mode else "0%"
     
-    # Construct SSML (The script that tells Azure how to speak)
     ssml_string = f"""
     <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{language_code}">
         <voice name="{voice_name}">
@@ -154,18 +144,13 @@ def autoplay_audio(file_path):
 st.set_page_config(page_title="AI Coach", page_icon="🧸") 
 local_css()
 
-# SIDEBAR
+# SIDEBAR (Settings Only)
 with st.sidebar:
     st.header("⚙️ Settings")
     selected_lang_label = st.selectbox("Language:", list(LANGUAGES.keys()))
     current_lang_config = LANGUAGES[selected_lang_label]
     lang_code = current_lang_config["code"]
     voice_name = current_lang_config["voice"]
-    
-    # --- NEW: SPEED CONTROL ---
-    st.write("") # Spacer
-    st.markdown("### 🐢 Speed")
-    slow_mode = st.checkbox("Slow Mode (Practice)", value=False)
     
     st.divider()
     mode = st.radio("Mode:", ["📚 Course", "✍️ Freestyle"])
@@ -198,8 +183,16 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# --- 2. AUDIO PLAYER (With Slow Mode) ---
-# We pass the 'slow_mode' checkbox value to our function
+# --- 2. AUDIO PLAYER (With Main Window Toggle) ---
+
+# <--- NEW LOCATION: Checkbox is now here, right above the player --->
+col1, col2 = st.columns([1, 2])
+with col1:
+    st.write("") # Alignment spacer
+    st.write("🔊 **Playback:**")
+with col2:
+    slow_mode = st.toggle("🐢 Slow Speed", value=False)
+
 audio_filepath = get_native_audio_path(clean_text, lang_code, voice_name, slow_mode)
 
 if audio_filepath and os.path.exists(audio_filepath):
