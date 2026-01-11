@@ -91,44 +91,57 @@ if not speech_key or not speech_region:
     st.stop()
 
 # --- HELPER FUNCTIONS ---
+def speed_to_ssml_rate(speed: float) -> str:
+    # speed is multiplier like 0.8..1.2
+    speed = round(float(speed), 1)
+    pct = int(round((speed - 1.0) * 100))
+    if pct == 0:
+        return "default"
+    sign = "+" if pct > 0 else ""  # Azure examples use + for positive
+    return f"{sign}{pct}%"
+
 def get_native_audio_path(text, language_code, voice_name, speed_rate):
-    # Hash includes the specific speed (e.g. "0.8")
-    # This means 0.8 and 0.9 are stored as different files.
-    filename_hash = hashlib.md5(f"{language_code}_{text}_{speed_rate}".encode()).hexdigest()
-    
+    speed_rate = round(float(speed_rate), 1)
+    ssml_rate = speed_to_ssml_rate(speed_rate)
+
+    # Include voice_name so cache doesn't mix voices
+    filename_hash = hashlib.md5(
+        f"{language_code}_{voice_name}_{text}_{speed_rate}".encode("utf-8")
+    ).hexdigest()
+
     folder = "audio_cache"
     readable_name = f"{filename_hash}_x{speed_rate}.wav"
     filepath = os.path.join(folder, readable_name)
 
-    if not os.path.exists(folder):
-        os.makedirs(folder)
+    os.makedirs(folder, exist_ok=True)
 
-    if os.path.exists(filepath):
-        if os.path.getsize(filepath) > 100: 
-            return filepath, readable_name
+    if os.path.exists(filepath) and os.path.getsize(filepath) > 100:
+        return filepath, readable_name
 
     speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
     audio_config = speechsdk.audio.AudioOutputConfig(filename=filepath)
     synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
-    
+
     safe_text = xml.sax.saxutils.escape(text)
-    
-    # We pass the slider value (e.g. 0.8) directly to Azure
+
     ssml_string = f"""
-    <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{language_code}">
-        <voice name="{voice_name}">
-            <prosody rate="{speed_rate}">
-                {safe_text}
-            </prosody>
-        </voice>
-    </speak>
-    """
-    
+<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{language_code}">
+  <voice name="{voice_name}">
+    <prosody rate="{ssml_rate}">{safe_text}</prosody>
+  </voice>
+</speak>
+""".strip()
+
     result = synthesizer.speak_ssml_async(ssml_string).get()
-    
+
     if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
         return filepath, readable_name
-        
+
+    if result.reason == speechsdk.ResultReason.Canceled:
+        details = speechsdk.SpeechSynthesisCancellationDetails.from_result(result)
+        # This will tell you if SSML was invalid / key/region issues / etc.
+        st.error(f"TTS canceled: {details.reason} | {details.error_details}")
+
     return None, None
 
 def render_player(file_path, speed_rate):
@@ -196,6 +209,7 @@ st.markdown(f"""
 st.write("🔊 **Playback Speed:**")
 # The Slider!
 speed_val = st.slider("Select Speed", min_value=0.5, max_value=1.2, value=1.0, step=0.1, label_visibility="collapsed")
+speed_val = round(float(speed_val), 1)
 
 # Logic
 audio_filepath, audio_filename = get_native_audio_path(clean_text, lang_code, voice_name, speed_val)
@@ -220,26 +234,25 @@ st.markdown("### 👇 TAP TO RECORD")
 audio_input = st.audio_input("Record", key=f"rec_{lang_code}_{clean_text[:5]}")
 
 if audio_input is not None:
-    st.spinner("Thinking...")
-    
-    with open("temp_input.wav", "wb") as f:
-        f.write(audio_input.read())
+    with st.spinner("Thinking..."):
+        with open("temp_input.wav", "wb") as f:
+            f.write(audio_input.read())
 
-    speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
-    speech_config.speech_recognition_language = lang_code
-    audio_config = speechsdk.audio.AudioConfig(filename="temp_input.wav")
-    
-    pron_cfg = speechsdk.PronunciationAssessmentConfig(
-        reference_text=clean_text,
-        grading_system=speechsdk.PronunciationAssessmentGradingSystem.HundredMark,
-        granularity=speechsdk.PronunciationAssessmentGranularity.Phoneme,
-        enable_miscue=True
-    )
-    
-    recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
-    pron_cfg.apply_to(recognizer)
-    
-    result = recognizer.recognize_once()
+        speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
+        speech_config.speech_recognition_language = lang_code
+        audio_config = speechsdk.audio.AudioConfig(filename="temp_input.wav")
+        
+        pron_cfg = speechsdk.PronunciationAssessmentConfig(
+            reference_text=clean_text,
+            grading_system=speechsdk.PronunciationAssessmentGradingSystem.HundredMark,
+            granularity=speechsdk.PronunciationAssessmentGranularity.Phoneme,
+            enable_miscue=True
+        )
+        
+        recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
+        pron_cfg.apply_to(recognizer)
+        
+        result = recognizer.recognize_once()
     
     if result.reason == speechsdk.ResultReason.RecognizedSpeech:
         pa = speechsdk.PronunciationAssessmentResult(result)
