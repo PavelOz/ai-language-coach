@@ -194,24 +194,18 @@ def render_player(file_path, speed_rate):
     _debug_log("D", "app.py:197", "render_player called", {"file_path": file_path, "speed_rate": speed_rate, "file_size": os.path.getsize(file_path) if os.path.exists(file_path) else 0})
     # #endregion
     with open(file_path, "rb") as f:
-        data = f.read()
-    b64 = base64.b64encode(data).decode()
+        audio_bytes = f.read()
     
-    # Unique ID every time to force browser reload
-    unique_id = f"PLAYER_{speed_rate}_{int(time.time())}"
+    # Use Streamlit's native audio player with cache-busting key
+    # The key includes speed_rate to force re-render when speed changes
+    audio_key = f"audio_{speed_rate}_{file_path}_{int(time.time())}"
     
-    # Purple border if not 1.0 (Visual Feedback)
-    border_style = "border: 4px solid #6610f2;" if speed_rate != 1.0 else ""
-
-    md = f"""
-        <audio controls id="{unique_id}" style="display:block; {border_style}">
-            <source src="data:audio/wav;base64,{b64}" type="audio/wav">
-        </audio>
-    """
     # #region agent log
-    _debug_log("D", "app.py:213", "audio player rendered", {"unique_id": unique_id, "speed_rate": speed_rate, "data_length": len(b64)})
+    _debug_log("D", "app.py:205", "audio player rendered", {"audio_key": audio_key, "speed_rate": speed_rate, "data_length": len(audio_bytes)})
     # #endregion
-    st.markdown(md, unsafe_allow_html=True)
+    
+    # Use Streamlit's native audio component - it handles caching properly
+    st.audio(audio_bytes, format="audio/wav", autoplay=False)
 
 # --- UI LAYOUT ---
 st.set_page_config(page_title="AI Coach", page_icon="🧸") 
@@ -307,7 +301,14 @@ with st.expander("🔍 Debug Info", expanded=False):
         st.warning("No audio file path returned")
 
 if audio_filepath and os.path.exists(audio_filepath):
+    # Visual feedback for non-standard speeds
+    if speed_val != 1.0:
+        st.markdown('<div style="border: 3px solid #6610f2; border-radius: 10px; padding: 10px; margin: 10px 0;">', unsafe_allow_html=True)
+    
     render_player(audio_filepath, speed_val)
+    
+    if speed_val != 1.0:
+        st.markdown('</div>', unsafe_allow_html=True)
     
     # Download Button
     with open(audio_filepath, "rb") as f:
