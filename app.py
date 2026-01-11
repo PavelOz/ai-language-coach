@@ -87,26 +87,28 @@ if not speech_key or not speech_region:
 
 # --- HELPER FUNCTIONS ---
 def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
-    # CHANGED: Suffix includes "v2" to force new files
-    speed_suffix = "_v2_xslow" if slow_mode else "_v2_normal"
+    # CHANGED: Suffix v3 forces fresh generation
+    speed_suffix = "_v3_slow" if slow_mode else "_v3_normal"
     filename_hash = hashlib.md5(f"{language_code}_{text}{speed_suffix}".encode()).hexdigest()
     
     folder = "audio_cache"
-    filepath = os.path.join(folder, f"{filename_hash}.wav")
+    # We include the readable suffix in the filename so we can debug easily
+    readable_name = f"{filename_hash}{speed_suffix}.wav"
+    filepath = os.path.join(folder, readable_name)
 
     if not os.path.exists(folder):
         os.makedirs(folder)
 
     if os.path.exists(filepath):
         if os.path.getsize(filepath) > 0:
-            return filepath
+            return filepath, readable_name # Return tuple (path, name)
 
     speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
     audio_config = speechsdk.audio.AudioOutputConfig(filename=filepath)
     synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
     
-    # CHANGED: Using 'x-slow' instead of percentage for better compatibility
-    rate = "x-slow" if slow_mode else "default"
+    # CHANGED: Rate is now -40% (Explicit numeric slowdown)
+    rate = "-40%" if slow_mode else "0%"
     
     ssml_string = f"""
     <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{language_code}">
@@ -121,9 +123,9 @@ def get_native_audio_path(text, language_code, voice_name, slow_mode=False):
     result = synthesizer.speak_ssml_async(ssml_string).get()
     
     if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-        return filepath
+        return filepath, readable_name
         
-    return None
+    return None, None
 
 def autoplay_audio(file_path):
     with open(file_path, "rb") as f:
@@ -187,15 +189,17 @@ with col1:
     st.write("") 
     st.write("🔊 **Playback:**")
 with col2:
-    slow_mode = st.toggle("🐢 Slow Mode", value=False)
+    slow_mode = st.toggle("🐢 Slow Mode (-40%)", value=False)
 
-# NEW: Dynamic Status Label
-if slow_mode:
-    st.info("🐢 Current Speed: Extra Slow")
-else:
-    st.caption("🐇 Current Speed: Normal")
+# LOGIC
+audio_filepath, audio_filename = get_native_audio_path(clean_text, lang_code, voice_name, slow_mode)
 
-audio_filepath = get_native_audio_path(clean_text, lang_code, voice_name, slow_mode)
+# DEBUG DISPLAY (Verify the file changed!)
+if audio_filename:
+    if "slow" in audio_filename:
+        st.caption(f"🐢 Playing Slow Version: `{audio_filename}`")
+    else:
+        st.caption(f"🐇 Playing Normal Version: `{audio_filename}`")
 
 if audio_filepath and os.path.exists(audio_filepath):
     autoplay_audio(audio_filepath)
