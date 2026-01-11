@@ -4,7 +4,6 @@ import azure.cognitiveservices.speech as speechsdk
 from dotenv import load_dotenv
 
 # --- CONFIGURATION: THE COURSE CONTENT ---
-# This dictionary acts as your "Database" of levels.
 LEVELS = {
     "Level 1: The Coffee Shop": [
         "I would like a cup of coffee.",
@@ -20,6 +19,11 @@ LEVELS = {
         "I have five years of experience in data science.",
         "I work well under pressure.",
         "Do you have any questions for me?"
+    ],
+    "Level 4: Daily Life": [
+        "Where is the nearest supermarket?",
+        "I am looking for the subway station.",
+        "Could you help me with this?"
     ]
 }
 
@@ -31,13 +35,12 @@ speech_key = os.getenv("AZURE_SPEECH_KEY")
 speech_region = os.getenv("AZURE_SPEECH_REGION")
 
 if not speech_key or not speech_region:
-    st.error("Missing Azure Keys! Check .env file.")
+    st.error("Missing Azure Keys! Check .env file or Streamlit Secrets.")
     st.stop()
 
 # --- HELPER FUNCTIONS ---
 def get_native_audio(text):
     """Generates audio from text using Azure TTS"""
-    # Create a unique cache key for this text to avoid re-generating it unnecessarily
     if f"audio_{text}" in st.session_state:
         return st.session_state[f"audio_{text}"]
 
@@ -48,7 +51,6 @@ def get_native_audio(text):
     result = synthesizer.speak_text_async(text).get()
     
     if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-        # Save to session state so we don't pay for it twice
         st.session_state[f"audio_{text}"] = result.audio_data
         return result.audio_data
     return None
@@ -56,41 +58,51 @@ def get_native_audio(text):
 # --- UI LAYOUT ---
 st.set_page_config(page_title="AI Coach", page_icon="🎧")
 
-# SIDEBAR: Level Selector
+# SIDEBAR: MODE SELECTION
 with st.sidebar:
-    st.header("📚 Course Library")
-    selected_level_name = st.selectbox("Choose a Scenario:", list(LEVELS.keys()))
+    st.header("🎮 Game Mode")
+    mode = st.radio("Choose Mode:", ["📚 Course Library", "✍️ Freestyle"])
     
-    # Progress Bar (Fake for now, but visualizes the game element)
-    st.progress(0.4, text="Course Progress")
+    st.divider()
+    
+    # Logic for selecting the target sentence
+    if mode == "📚 Course Library":
+        selected_level_name = st.selectbox("Scenario:", list(LEVELS.keys()))
+        # Progress Bar (Visual only)
+        st.progress(0.5, text="Level Progress")
+        sentences = LEVELS[selected_level_name]
+        target_text = st.selectbox("Select a phrase:", sentences)
+        
+    else: # Freestyle Mode
+        st.markdown("Type any sentence you want to practice.")
+        target_text = st.text_area("Target Text:", "The quick brown fox jumps over the lazy dog.")
 
 # MAIN APP
-st.title(selected_level_name)
+st.title("AI Language Coach")
 
-# Get the list of sentences for this level
-sentences = LEVELS[selected_level_name]
-
-# Let user pick which sentence to practice in this level
-selected_sentence = st.selectbox("Select a phrase to practice:", sentences)
+if not target_text:
+    st.warning("Please enter some text to start.")
+    st.stop()
 
 st.divider()
 
 # 1. THE LISTENING PHASE
 st.markdown("### 1. Listen")
-st.info(f"Target: **{selected_sentence}**")
+st.info(f"Target: **{target_text}**")
 
-# Play Audio (Cached)
-audio_data = get_native_audio(selected_sentence)
-if audio_data:
-    st.audio(audio_data, format="audio/wav")
+# Play Audio
+if st.button("▶️ Play Native Audio"):
+    audio_data = get_native_audio(target_text)
+    if audio_data:
+        st.audio(audio_data, format="audio/wav")
 
 st.divider()
 
 # 2. THE SPEAKING PHASE
 st.markdown("### 2. Speak")
 
-# Unique key is needed so the widget resets when you change sentences
-audio_input = st.audio_input("Record your voice", key=f"rec_{selected_sentence}")
+# Unique key ensures widget resets if text changes
+audio_input = st.audio_input("Record your voice", key=f"rec_{target_text[:10]}")
 
 if audio_input is not None:
     st.spinner("Analyzing...")
@@ -105,7 +117,7 @@ if audio_input is not None:
     audio_config = speechsdk.audio.AudioConfig(filename="temp_input.wav")
     
     pron_cfg = speechsdk.PronunciationAssessmentConfig(
-        reference_text=selected_sentence,
+        reference_text=target_text,
         grading_system=speechsdk.PronunciationAssessmentGradingSystem.HundredMark,
         granularity=speechsdk.PronunciationAssessmentGranularity.Word,
         enable_miscue=True
